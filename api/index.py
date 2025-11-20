@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Optional
 import uuid
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from mangum import Mangum
-
-# Ensure /tmp directory exists
-os.makedirs("/tmp/resume-uploads", exist_ok=True)
+try:
+    from fastapi import FastAPI, UploadFile, File, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from pydantic import BaseModel
+    from mangum import Mangum
+except ImportError as e:
+    print(f"Import error: {e}")
+    raise
 
 # Create FastAPI app
 app = FastAPI(
@@ -47,12 +48,17 @@ class AnalysisRequest(BaseModel):
 ALLOWED_EXTENSIONS = ["pdf", "docx", "doc"]
 MAX_UPLOAD_SIZE = 10485760  # 10MB
 
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"message": "Resume ATS Analyzer API", "status": "online"}
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "version": "1.0.0"}
 
-@app.post("/api/upload/", response_model=UploadResponse)
+@app.post("/api/upload/")
 async def upload_resume(file: UploadFile = File(...)):
     """Upload a resume file for analysis"""
 
@@ -95,17 +101,24 @@ async def upload_resume(file: UploadFile = File(...)):
             detail=f"Failed to save file: {str(e)}"
         )
 
-    return UploadResponse(
-        file_id=file_id,
-        filename=file.filename,
-        file_type=file_extension,
-        size=file_size,
-        message="File uploaded successfully"
-    )
+    return {
+        "file_id": file_id,
+        "filename": file.filename,
+        "file_type": file_extension,
+        "size": file_size,
+        "message": "File uploaded successfully"
+    }
 
 @app.post("/api/analyze/")
-async def analyze_resume(request: AnalysisRequest):
+async def analyze_resume(request: dict):
     """Analyze a resume"""
+
+    file_id = request.get("file_id")
+    if not file_id:
+        raise HTTPException(
+            status_code=400,
+            detail="file_id is required"
+        )
 
     # Find the uploaded file
     upload_dir = Path("/tmp/resume-uploads")
@@ -113,7 +126,7 @@ async def analyze_resume(request: AnalysisRequest):
     # Try to find the file with any extension
     file_path = None
     for ext in ALLOWED_EXTENSIONS:
-        potential_path = upload_dir / f"{request.file_id}.{ext}"
+        potential_path = upload_dir / f"{file_id}.{ext}"
         if potential_path.exists():
             file_path = potential_path
             break
@@ -128,7 +141,7 @@ async def analyze_resume(request: AnalysisRequest):
     # TODO: Implement full analysis logic
     return {
         "analysis_id": str(uuid.uuid4()),
-        "file_id": request.file_id,
+        "file_id": file_id,
         "ats_score": 85,
         "overall_score": 82,
         "keyword_score": 78,
