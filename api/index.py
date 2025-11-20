@@ -1,113 +1,168 @@
 """
-Vercel serverless function - Minimal working version
+Vercel Python Serverless Function - Native format
 """
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from mangum import Mangum
-import os
-from pathlib import Path
+from http.server import BaseHTTPRequestHandler
+import json
+import cgi
 import uuid
+from pathlib import Path
+from urllib.parse import parse_qs
+import io
 
-# Initialize FastAPI
-app = FastAPI()
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Constants
 ALLOWED_EXTENSIONS = ["pdf", "docx", "doc"]
 MAX_SIZE = 10 * 1024 * 1024  # 10MB
 
-@app.get("/")
-def root():
-    return {"status": "ok", "message": "API is running"}
+class handler(BaseHTTPRequestHandler):
+    def _send_cors_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
-@app.get("/api/health")
-def health():
-    return {"status": "healthy"}
+    def _send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json')
+        self._send_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
 
-@app.post("/api/upload/")
-async def upload(file: UploadFile = File(...)):
-    try:
-        # Check extension
-        ext = file.filename.split(".")[-1].lower()
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self._send_cors_headers()
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path == '/api/health':
+            self._send_json({"status": "healthy", "version": "1.0.0"})
+        elif self.path == '/':
+            self._send_json({"status": "ok", "message": "API is running"})
+        else:
+            self._send_json({"error": "Not found"}, 404)
+
+    def do_POST(self):
+        try:
+            if self.path == '/api/upload/':
+                self._handle_upload()
+            elif self.path == '/api/analyze/':
+                self._handle_analyze()
+            else:
+                self._send_json({"error": "Not found"}, 404)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
+    def _handle_upload(self):
+        # Parse multipart form data
+        content_type = self.headers.get('Content-Type', '')
+        if 'multipart/form-data' not in content_type:
+            self._send_json({"error": "Content-Type must be multipart/form-data"}, 400)
+            return
+
+        # Get boundary
+        boundary = content_type.split('boundary=')[1].encode()
+
+        # Read body
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+
+        # Parse multipart data manually
+        parts = body.split(b'--' + boundary)
+        file_data = None
+        filename = None
+
+        for part in parts:
+            if b'Content-Disposition' in part and b'filename=' in part:
+                # Extract filename
+                header_section = part.split(b'\r\n\r\n')[0]
+                for line in header_section.split(b'\r\n'):
+                    if b'filename=' in line:
+                        filename = line.decode().split('filename="')[1].split('"')[0]
+                        break
+
+                # Extract file data
+                file_data = part.split(b'\r\n\r\n', 1)[1].rsplit(b'\r\n', 1)[0]
+                break
+
+        if not file_data or not filename:
+            self._send_json({"error": "No file uploaded"}, 400)
+            return
+
+        # Validate extension
+        ext = filename.split('.')[-1].lower()
         if ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(400, f"Invalid file type. Use: {', '.join(ALLOWED_EXTENSIONS)}")
+            self._send_json({
+                "error": f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+            }, 400)
+            return
 
-        # Read content
-        content = await file.read()
-        if len(content) > MAX_SIZE:
-            raise HTTPException(400, "File too large (max 10MB)")
+        # Validate size
+        if len(file_data) > MAX_SIZE:
+            self._send_json({"error": "File too large (max 10MB)"}, 400)
+            return
 
-        # Generate ID
+        # Save file
         file_id = str(uuid.uuid4())
-
-        # Save to /tmp
         upload_dir = Path("/tmp/resume-uploads")
         upload_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = upload_dir / f"{file_id}.{ext}"
-        file_path.write_bytes(content)
+        file_path.write_bytes(file_data)
 
-        return {
+        self._send_json({
             "file_id": file_id,
-            "filename": file.filename,
+            "filename": filename,
             "file_type": ext,
-            "size": len(content),
+            "size": len(file_data),
             "message": "Upload successful"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
+        })
 
-@app.post("/api/analyze/")
-async def analyze(request: dict):
-    file_id = request.get("file_id")
-    if not file_id:
-        raise HTTPException(400, "file_id required")
+    def _handle_analyze(self):
+        # Read request body
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
 
-    # Check if file exists
-    upload_dir = Path("/tmp/resume-uploads")
-    found = False
-    for ext in ALLOWED_EXTENSIONS:
-        if (upload_dir / f"{file_id}.{ext}").exists():
-            found = True
-            break
+        try:
+            data = json.loads(body.decode())
+        except:
+            self._send_json({"error": "Invalid JSON"}, 400)
+            return
 
-    if not found:
-        raise HTTPException(404, "File not found")
+        file_id = data.get('file_id')
+        if not file_id:
+            self._send_json({"error": "file_id required"}, 400)
+            return
 
-    # Return mock analysis
-    return {
-        "analysis_id": str(uuid.uuid4()),
-        "file_id": file_id,
-        "ats_score": 85,
-        "overall_score": 82,
-        "keyword_score": 78,
-        "formatting_score": 90,
-        "readability_score": 80,
-        "sections_found": ["Summary", "Experience", "Education", "Skills"],
-        "key_findings": [
-            "Strong technical skills section",
-            "Clear work experience descriptions",
-            "Good use of action verbs"
-        ],
-        "recommendations": [
-            "Add more quantifiable achievements",
-            "Include relevant keywords",
-            "Consider adding a skills summary"
-        ],
-        "keywords_found": ["Python", "JavaScript", "ML", "Data Analysis"],
-        "missing_keywords": ["Cloud", "DevOps", "Agile"],
-        "status": "completed"
-    }
+        # Check if file exists
+        upload_dir = Path("/tmp/resume-uploads")
+        found = False
+        for ext in ALLOWED_EXTENSIONS:
+            if (upload_dir / f"{file_id}.{ext}").exists():
+                found = True
+                break
 
-# Vercel handler
-handler = Mangum(app, lifespan="off")
+        if not found:
+            self._send_json({"error": "File not found"}, 404)
+            return
+
+        # Return mock analysis
+        self._send_json({
+            "analysis_id": str(uuid.uuid4()),
+            "file_id": file_id,
+            "ats_score": 85,
+            "overall_score": 82,
+            "keyword_score": 78,
+            "formatting_score": 90,
+            "readability_score": 80,
+            "sections_found": ["Summary", "Experience", "Education", "Skills"],
+            "key_findings": [
+                "Strong technical skills section",
+                "Clear work experience descriptions",
+                "Good use of action verbs"
+            ],
+            "recommendations": [
+                "Add more quantifiable achievements",
+                "Include relevant keywords",
+                "Consider adding a skills summary"
+            ],
+            "keywords_found": ["Python", "JavaScript", "ML", "Data Analysis"],
+            "missing_keywords": ["Cloud", "DevOps", "Agile"],
+            "status": "completed"
+        })
