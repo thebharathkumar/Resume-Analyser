@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # API
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:3001"]
+    CORS_ORIGINS: List[str] = ["*"]  # Allow all origins for Vercel deployment
 
     # Upload settings
     MAX_UPLOAD_SIZE: int = 10485760  # 10MB
