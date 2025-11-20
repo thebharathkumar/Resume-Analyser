@@ -6,6 +6,17 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![React](https://img.shields.io/badge/react-18.0+-61dafb.svg)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/thebharathkumar/Resume-Analyser)
+
+## ⚡ ONE-CLICK DEPLOY
+
+**Deploy your own instance in 2 minutes - completely FREE!**
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/thebharathkumar/Resume-Analyser)
+
+📖 **[See ONE_CLICK_DEPLOY.md for detailed instructions](./ONE_CLICK_DEPLOY.md)**
+
+---
 
 ## ✨ Features
 
