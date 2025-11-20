@@ -1,13 +1,12 @@
 """
-Vercel Python Serverless Function - Native format
+Vercel Python Serverless Function - Native format with proper multipart handling
 """
 from http.server import BaseHTTPRequestHandler
 import json
-import cgi
 import uuid
 from pathlib import Path
-from urllib.parse import parse_qs
-import io
+import cgi
+from io import BytesIO
 
 ALLOWED_EXTENSIONS = ["pdf", "docx", "doc"]
 MAX_SIZE = 10 * 1024 * 1024  # 10MB
@@ -47,122 +46,142 @@ class handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "Not found"}, 404)
         except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+            print(f"Error in POST: {e}")
+            import traceback
+            traceback.print_exc()
+            self._send_json({"error": str(e), "detail": "Internal server error"}, 500)
 
     def _handle_upload(self):
-        # Parse multipart form data
-        content_type = self.headers.get('Content-Type', '')
-        if 'multipart/form-data' not in content_type:
-            self._send_json({"error": "Content-Type must be multipart/form-data"}, 400)
-            return
+        try:
+            # Get content type and length
+            content_type = self.headers.get('Content-Type', '')
+            content_length = int(self.headers.get('Content-Length', 0))
 
-        # Get boundary
-        boundary = content_type.split('boundary=')[1].encode()
+            if not content_type or 'multipart/form-data' not in content_type:
+                self._send_json({"error": "Content-Type must be multipart/form-data"}, 400)
+                return
 
-        # Read body
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
+            # Read the body
+            body = self.rfile.read(content_length)
 
-        # Parse multipart data manually
-        parts = body.split(b'--' + boundary)
-        file_data = None
-        filename = None
+            # Parse using cgi.FieldStorage
+            environ = {
+                'REQUEST_METHOD': 'POST',
+                'CONTENT_TYPE': content_type,
+                'CONTENT_LENGTH': str(content_length),
+            }
 
-        for part in parts:
-            if b'Content-Disposition' in part and b'filename=' in part:
-                # Extract filename
-                header_section = part.split(b'\r\n\r\n')[0]
-                for line in header_section.split(b'\r\n'):
-                    if b'filename=' in line:
-                        filename = line.decode().split('filename="')[1].split('"')[0]
-                        break
+            form = cgi.FieldStorage(
+                fp=BytesIO(body),
+                environ=environ,
+                keep_blank_values=True
+            )
 
-                # Extract file data
-                file_data = part.split(b'\r\n\r\n', 1)[1].rsplit(b'\r\n', 1)[0]
-                break
+            # Get the file field
+            if 'file' not in form:
+                self._send_json({"error": "No file field in upload"}, 400)
+                return
 
-        if not file_data or not filename:
-            self._send_json({"error": "No file uploaded"}, 400)
-            return
+            file_item = form['file']
 
-        # Validate extension
-        ext = filename.split('.')[-1].lower()
-        if ext not in ALLOWED_EXTENSIONS:
+            if not file_item.filename:
+                self._send_json({"error": "No file selected"}, 400)
+                return
+
+            filename = file_item.filename
+            file_data = file_item.file.read()
+
+            # Validate extension
+            ext = filename.split('.')[-1].lower()
+            if ext not in ALLOWED_EXTENSIONS:
+                self._send_json({
+                    "error": f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+                }, 400)
+                return
+
+            # Validate size
+            if len(file_data) > MAX_SIZE:
+                self._send_json({"error": "File too large (max 10MB)"}, 400)
+                return
+
+            # Save file
+            file_id = str(uuid.uuid4())
+            upload_dir = Path("/tmp/resume-uploads")
+            upload_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path = upload_dir / f"{file_id}.{ext}"
+            file_path.write_bytes(file_data)
+
             self._send_json({
-                "error": f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
-            }, 400)
-            return
+                "file_id": file_id,
+                "filename": filename,
+                "file_type": ext,
+                "size": len(file_data),
+                "message": "Upload successful"
+            })
 
-        # Validate size
-        if len(file_data) > MAX_SIZE:
-            self._send_json({"error": "File too large (max 10MB)"}, 400)
-            return
-
-        # Save file
-        file_id = str(uuid.uuid4())
-        upload_dir = Path("/tmp/resume-uploads")
-        upload_dir.mkdir(parents=True, exist_ok=True)
-
-        file_path = upload_dir / f"{file_id}.{ext}"
-        file_path.write_bytes(file_data)
-
-        self._send_json({
-            "file_id": file_id,
-            "filename": filename,
-            "file_type": ext,
-            "size": len(file_data),
-            "message": "Upload successful"
-        })
+        except Exception as e:
+            print(f"Upload error: {e}")
+            import traceback
+            traceback.print_exc()
+            self._send_json({"error": str(e)}, 500)
 
     def _handle_analyze(self):
-        # Read request body
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
-
         try:
-            data = json.loads(body.decode())
-        except:
-            self._send_json({"error": "Invalid JSON"}, 400)
-            return
+            # Read request body
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
 
-        file_id = data.get('file_id')
-        if not file_id:
-            self._send_json({"error": "file_id required"}, 400)
-            return
+            try:
+                data = json.loads(body.decode())
+            except:
+                self._send_json({"error": "Invalid JSON"}, 400)
+                return
 
-        # Check if file exists
-        upload_dir = Path("/tmp/resume-uploads")
-        found = False
-        for ext in ALLOWED_EXTENSIONS:
-            if (upload_dir / f"{file_id}.{ext}").exists():
-                found = True
-                break
+            file_id = data.get('file_id')
+            if not file_id:
+                self._send_json({"error": "file_id required"}, 400)
+                return
 
-        if not found:
-            self._send_json({"error": "File not found"}, 404)
-            return
+            # Check if file exists
+            upload_dir = Path("/tmp/resume-uploads")
+            found = False
+            for ext in ALLOWED_EXTENSIONS:
+                if (upload_dir / f"{file_id}.{ext}").exists():
+                    found = True
+                    break
 
-        # Return mock analysis
-        self._send_json({
-            "analysis_id": str(uuid.uuid4()),
-            "file_id": file_id,
-            "ats_score": 85,
-            "overall_score": 82,
-            "keyword_score": 78,
-            "formatting_score": 90,
-            "readability_score": 80,
-            "sections_found": ["Summary", "Experience", "Education", "Skills"],
-            "key_findings": [
-                "Strong technical skills section",
-                "Clear work experience descriptions",
-                "Good use of action verbs"
-            ],
-            "recommendations": [
-                "Add more quantifiable achievements",
-                "Include relevant keywords",
-                "Consider adding a skills summary"
-            ],
-            "keywords_found": ["Python", "JavaScript", "ML", "Data Analysis"],
-            "missing_keywords": ["Cloud", "DevOps", "Agile"],
-            "status": "completed"
-        })
+            if not found:
+                self._send_json({"error": "File not found"}, 404)
+                return
+
+            # Return mock analysis
+            self._send_json({
+                "analysis_id": str(uuid.uuid4()),
+                "file_id": file_id,
+                "ats_score": 85,
+                "overall_score": 82,
+                "keyword_score": 78,
+                "formatting_score": 90,
+                "readability_score": 80,
+                "sections_found": ["Summary", "Experience", "Education", "Skills"],
+                "key_findings": [
+                    "Strong technical skills section",
+                    "Clear work experience descriptions",
+                    "Good use of action verbs"
+                ],
+                "recommendations": [
+                    "Add more quantifiable achievements",
+                    "Include relevant keywords",
+                    "Consider adding a skills summary"
+                ],
+                "keywords_found": ["Python", "JavaScript", "ML", "Data Analysis"],
+                "missing_keywords": ["Cloud", "DevOps", "Agile"],
+                "status": "completed"
+            })
+
+        except Exception as e:
+            print(f"Analyze error: {e}")
+            import traceback
+            traceback.print_exc()
+            self._send_json({"error": str(e)}, 500)
