@@ -26,13 +26,21 @@ function App() {
     setIsLoading(true);
 
     try {
+      console.log('Uploading file:', file.name, 'Size:', file.size);
       const response = await uploadResume(file);
+      console.log('Upload response:', response);
       setFileId(response.file_id);
       toast.success('File uploaded successfully!');
       setStep('configure');
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Upload failed');
-      console.error('Upload error:', error);
+      console.error('Upload error details:', {
+        message: error.message,
+        response: error.response,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      const errorMsg = error.response?.data?.detail || error.message || 'Upload failed';
+      toast.error(errorMsg);
     } finally {
       setIsLoading(false);
     }
