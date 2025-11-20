@@ -1,23 +1,18 @@
 """
 Vercel serverless function entry point - Self-contained version
 """
-import sys
 import os
 from pathlib import Path
-
-# Add backend to path
-backend_path = str(Path(__file__).parent.parent / "backend")
-sys.path.insert(0, backend_path)
-
-# Ensure /tmp directory exists
-os.makedirs("/tmp/resume-uploads", exist_ok=True)
+from typing import Optional
+import uuid
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
-import uuid
 from mangum import Mangum
+
+# Ensure /tmp directory exists
+os.makedirs("/tmp/resume-uploads", exist_ok=True)
 
 # Create FastAPI app
 app = FastAPI(
