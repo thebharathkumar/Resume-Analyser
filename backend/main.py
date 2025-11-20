@@ -30,8 +30,8 @@ app.add_middleware(
 # Include API routes
 app.include_router(api_router, prefix="/api")
 
-# Create uploads directory if it doesn't exist
-os.makedirs("uploads", exist_ok=True)
+# Create uploads directory in /tmp for Vercel serverless
+os.makedirs("/tmp/resume-uploads", exist_ok=True)
 
 @app.get("/")
 async def root():

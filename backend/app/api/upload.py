@@ -1,11 +1,12 @@
 """
-File upload API endpoints
+File upload API endpoints - Optimized for Vercel serverless
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 import os
 import uuid
 from pathlib import Path
+import tempfile
 
 from ..core.config import settings
 from ..models.analysis import UploadResponse
@@ -17,8 +18,7 @@ router = APIRouter()
 async def upload_resume(file: UploadFile = File(...)):
     """
     Upload a resume file for analysis
-
-    Accepts PDF and DOCX files up to 10MB
+    Uses /tmp directory for Vercel serverless compatibility
     """
 
     # Validate file type
@@ -44,15 +44,21 @@ async def upload_resume(file: UploadFile = File(...)):
     # Generate unique file ID
     file_id = str(uuid.uuid4())
 
-    # Create uploads directory if it doesn't exist
-    upload_dir = Path(settings.UPLOAD_DIR)
-    upload_dir.mkdir(exist_ok=True)
+    # Use /tmp for Vercel serverless (ephemeral storage)
+    upload_dir = Path("/tmp/resume-uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
 
     # Save file with unique name
     file_path = upload_dir / f"{file_id}.{file_extension}"
 
-    with open(file_path, "wb") as f:
-        f.write(content)
+    try:
+        with open(file_path, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save file: {str(e)}"
+        )
 
     return UploadResponse(
         file_id=file_id,
@@ -65,20 +71,26 @@ async def upload_resume(file: UploadFile = File(...)):
 
 @router.delete("/{file_id}")
 async def delete_uploaded_file(file_id: str):
-    """Delete an uploaded file"""
+    """Delete an uploaded file from /tmp"""
 
-    # Find and delete the file
-    upload_dir = Path(settings.UPLOAD_DIR)
+    upload_dir = Path("/tmp/resume-uploads")
 
     deleted = False
     for ext in settings.ALLOWED_EXTENSIONS:
         file_path = upload_dir / f"{file_id}.{ext}"
         if file_path.exists():
-            os.remove(file_path)
-            deleted = True
-            break
+            try:
+                os.remove(file_path)
+                deleted = True
+                break
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to delete file: {str(e)}"
+                )
 
     if not deleted:
-        raise HTTPException(status_code=404, detail="File not found")
+        # File might have already been cleaned up by Vercel, that's okay
+        return {"message": "File not found or already deleted", "file_id": file_id}
 
     return {"message": "File deleted successfully", "file_id": file_id}

@@ -1,5 +1,5 @@
 """
-Resume analysis API endpoints
+Resume analysis API endpoints - Optimized for Vercel serverless
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -40,8 +40,8 @@ async def analyze_resume(request: AnalyzeRequestBody):
     Returns detailed analysis results with scores and recommendations
     """
 
-    # Find the uploaded file
-    upload_dir = Path(settings.UPLOAD_DIR)
+    # Find the uploaded file in /tmp (Vercel serverless)
+    upload_dir = Path("/tmp/resume-uploads")
     file_path = None
     file_type = None
 
@@ -55,7 +55,7 @@ async def analyze_resume(request: AnalyzeRequestBody):
     if not file_path:
         raise HTTPException(
             status_code=404,
-            detail="File not found. Please upload the file first."
+            detail="File not found. Please upload the file first or file may have expired."
         )
 
     try:
@@ -81,12 +81,10 @@ async def analyze_resume(request: AnalyzeRequestBody):
 async def quick_analyze(request: AnalyzeRequestBody):
     """
     Quick analysis - returns only key metrics
-
-    Useful for initial scan before full analysis
     """
 
-    # Find the uploaded file
-    upload_dir = Path(settings.UPLOAD_DIR)
+    # Find the uploaded file in /tmp
+    upload_dir = Path("/tmp/resume-uploads")
     file_path = None
     file_type = None
 
@@ -100,11 +98,11 @@ async def quick_analyze(request: AnalyzeRequestBody):
     if not file_path:
         raise HTTPException(
             status_code=404,
-            detail="File not found. Please upload the file first."
+            detail="File not found. Please upload the file first or file may have expired."
         )
 
     try:
-        # Perform full analysis (we'll extract key metrics)
+        # Perform full analysis
         result = analyzer.analyze_resume(
             file_path=file_path,
             file_type=file_type,
@@ -137,10 +135,9 @@ async def analyzer_health():
     """Check if analyzer services are healthy"""
 
     try:
-        # Quick check of all services
+        # Quick check
         test_text = "This is a test."
 
-        # Test each service
         services_status = {
             "keyword_analyzer": "ok",
             "ats_analyzer": "ok",
