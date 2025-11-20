@@ -5,31 +5,39 @@ import sys
 import os
 from pathlib import Path
 
-# Get the directory containing this file
-current_dir = Path(__file__).parent
-backend_dir = current_dir.parent / "backend"
-
-# Add backend to path
-sys.path.insert(0, str(backend_dir))
+# Add the backend directory to Python path
+backend_path = str(Path(__file__).parent.parent / "backend")
+if backend_path not in sys.path:
+    sys.path.insert(0, backend_path)
 
 # Ensure /tmp directory exists for uploads
 os.makedirs("/tmp/resume-uploads", exist_ok=True)
 
-try:
-    from mangum import Mangum
-    from main import app
+# Import and create the FastAPI app
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api import router as api_router
+from app.core.config import settings
 
-    # Create handler for Vercel - must be named 'handler'
-    handler = Mangum(app, lifespan="off")
+# Create FastAPI application
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="AI-powered ATS Resume Analyzer",
+)
 
-except Exception as e:
-    print(f"Error loading app: {e}")
-    import traceback
-    traceback.print_exc()
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    # Create a fallback handler that returns the error
-    def handler(event, context):
-        return {
-            "statusCode": 500,
-            "body": f"Failed to load application: {str(e)}"
-        }
+# Include API routes
+app.include_router(api_router, prefix="/api")
+
+# Create Mangum handler for Vercel
+from mangum import Mangum
+handler = Mangum(app, lifespan="off")
