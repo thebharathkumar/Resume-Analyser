@@ -5,13 +5,22 @@ import sys
 import os
 from pathlib import Path
 
-# Add backend to Python path
-backend_path = Path(__file__).parent.parent / "backend"
-sys.path.insert(0, str(backend_path))
+# Get the directory containing this file
+current_dir = Path(__file__).parent
+backend_dir = current_dir.parent / "backend"
 
-# Import after path is set
-from mangum import Mangum
-from main import app
+# Add backend to path
+sys.path.insert(0, str(backend_dir))
 
-# Create handler
-handler = Mangum(app, lifespan="off")
+try:
+    from mangum import Mangum
+    from main import app
+
+    # Create handler for Vercel
+    handler = Mangum(app, lifespan="off")
+
+except Exception as e:
+    print(f"Error loading app: {e}")
+    import traceback
+    traceback.print_exc()
+    raise
