@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..core.config import settings
 from ..models.analysis import ResumeAnalysisResult, AnalysisRequest
-from ..services.main_analyzer import MainAnalyzer
+from ..services.main_analyzer_lite import MainAnalyzer
 
 router = APIRouter()
 

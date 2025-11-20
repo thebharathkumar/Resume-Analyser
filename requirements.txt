@@ -1,0 +1,15 @@
+fastapi==0.104.1
+python-multipart==0.0.6
+pydantic==2.5.0
+pydantic-settings==2.1.0
+mangum==0.17.0
+
+# Document parsing
+PyPDF2==3.0.1
+python-docx==1.1.0
+
+# Lightweight text analysis (instead of spaCy for Vercel)
+textstat==0.7.3
+
+# Utilities
+python-dotenv==1.0.0
